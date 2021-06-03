@@ -121,12 +121,29 @@ class PruneRegistry(object):
       layers.SimpleRNN,
   })
 
+  _STRUCTURE_LAYERS = frozenset({
+      layers.Conv2D
+  })
+
   _RNN_CELLS_STR = ', '.join(str(_RNN_CELLS_WEIGHTS_MAP.keys()))
 
   _RNN_CELL_ERROR_MSG = (
       'RNN Layer {} contains cell type {} which is either not supported or does'
       'not inherit PrunableLayer. The cell must be one of {}, or implement '
       'PrunableLayer.')
+
+  @classmethod
+  def supports_by_filter(cls, layer):
+      """Returns whether the registry supports this layer type for filter pruning.
+
+      Args:
+        layer: The layer to check for support.
+
+      Returns:
+        True/False  whether the layer type is supported for filter pruning.
+      """
+
+      return layer.__class__ in cls._STRUCTURE_LAYERS
 
   @classmethod
   def supports(cls, layer):
