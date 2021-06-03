@@ -102,6 +102,8 @@ class PruneLowMagnitude(Wrapper):
                pruning_schedule=pruning_sched.ConstantSparsity(0.5, 0),
                block_size=(1, 1),
                block_pooling_type='AVG',
+               filter_blocks=False,
+               filter_block_pooling_type='AVG',
                **kwargs):
     """Create a pruning wrapper for a keras layer.
 
@@ -115,11 +117,18 @@ class PruneLowMagnitude(Wrapper):
         sparse pattern in rank-2 weight tensors.
       block_pooling_type: (optional) The function to use to pool weights in the
         block. Must be 'AVG' or 'MAX'.
+      filter_blocks: (optional) If enabled, convolutional layers will prune
+        entire filters (grouped by output channel). The filters can be removed
+        from the network structure when stripping the pruning wrappers.
+      filter_blocks_pooling_type: (optional) The function to use to pool
+        weights in the filter blocks. Must be 'AVG' or 'MAX'.
       **kwargs: Additional keyword arguments to be passed to the keras layer.
     """
     self.pruning_schedule = pruning_schedule
     self.block_size = block_size
-    self.block_pooling_type = block_pooling_type
+    self.block_pooling_type = block_pooling_type.upper()
+    self.filter_blocks = filter_blocks
+    self.filter_block_pooling_type = filter_block_pooling_type.upper()
 
     # An instance of the Pruning class. This class contains the logic to prune
     # the weights of this layer.
@@ -132,6 +141,10 @@ class PruneLowMagnitude(Wrapper):
       raise ValueError(
           'Unsupported pooling type \'{}\'. Should be \'AVG\' or \'MAX\'.'
           .format(block_pooling_type))
+    if filter_block_pooling_type not in ['AVG', 'MAX']:
+      raise ValueError(
+          'Unsupported filter block pooling type \'{}\'. Should be \'AVG\' or \'MAX\'.'
+          .format(filter_block_pooling_type))
 
     if not isinstance(layer, tf.keras.layers.Layer):
       raise ValueError(
@@ -230,12 +243,19 @@ class PruneLowMagnitude(Wrapper):
       return self.pruning_step
 
     # Create a pruning object
+    filter_pruning_description = (
+        {'filter_block_pooling_type': self.filter_block_pooling_type}
+        if self.filter_blocks and prune_registry.PruneRegistry.supports_by_filter(self.layer)
+        else None
+    )
     self.pruning_obj = pruning_impl.Pruning(
         training_step_fn=training_step_fn,
         pruning_vars=self.pruning_vars,
         pruning_schedule=self.pruning_schedule,
         block_size=self.block_size,
-        block_pooling_type=self.block_pooling_type)
+        block_pooling_type=self.block_pooling_type,
+        filter_pruning_description=filter_pruning_description,
+    )
 
   def call(self, inputs, training=None, **kwargs):
     if training is None:
