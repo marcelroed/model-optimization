@@ -110,6 +110,15 @@ def expand_tensor(tensor, block_size):
   return expanded_tensor
 
 
+def generalized_expand_tensor(tensor, block_size):
+    tensor_shape = tensor.get_shape()
+    assert tensor_shape.ndims == len(block_size)
+    for axis, axis_repeats in enumerate(block_size):
+        tensor = tf.repeat(tensor, axis=axis, repeats=axis_repeats)
+
+    return tensor
+
+
 def factorized_pool(input_tensor,
                     window_shape,
                     pooling_type,
@@ -157,3 +166,48 @@ def factorized_pool(input_tensor,
         padding=padding)
 
   return tf.squeeze(tf.transpose(width_pooling, perm=[0, 1, 3, 2]))
+
+
+def generalized_factorized_pool(input_tensor, window_shape, pooling_type, strides, padding, name='factorized_pool'):
+    """Performs pooling on an N-D pooling on an N-D tensor.
+
+    Only works for up to 4D tensors, and can't pool the final dimension of the input_tensor.
+
+    Args:
+      input_tensor: Input tensor. Rank at least 2.
+      window_shape: Pooling window shape, length 1 less than the rank of the input tensor.
+      pooling_type: Either 'MAX' or 'AVG'
+      strides: The stride of the pooling window, same length as the window_shape.
+      padding: 'SAME' or 'VALID'.
+      name: Name of the op
+
+    Returns:
+      A tensor of the same rank as the input tensor, that has been pooled using the suggested window_shape
+
+    Raises:
+      ValueError: if the input tensor is not rank 2
+    """
+
+    assert input_tensor.get_shape().ndims <= 4, 'input_tensor dims must be less than 4'
+    assert len(window_shape) == len(strides) == input_tensor.get_shape().ndims - 1
+
+    with tf.name_scope(name):
+        # Pooling operation needs input_tensor to be of shape [batch, *spatial_axes, out_channels], and will pool along spatial_axes
+        # We will treat the input channels as a spatial axis in order to pool over it
+        aligned = tf.expand_dims(input_tensor, 0)  # Add "batch" dimension
+        pooled = tf.nn.pool(aligned, window_shape, padding=padding, strides=strides, pooling_type=pooling_type)
+        shape_restored = tf.squeeze(pooled, axis=0)  # Remove batch dimension
+
+    return shape_restored
+
+
+if __name__ == '__main__':
+    # to_pool = tf.ones(dtype=tf.float32, shape=(10, 10))
+    # pooled = factorized_pool(to_pool, window_shape=(2, 2), pooling_type='MAX', strides=(2, 2), padding='SAME')
+    # tf.print(pooled)
+
+    weights = tf.ones(dtype=tf.float32, shape=(10, 20, 30, 40))
+    # tf.print(generalized_factorized_pool(weights, [1, 2, 3], 'AVG', [1, 2, 3], 'SAME').shape)
+
+    pre_expansion = tf.ones(dtype=tf.float32, shape=(1, 1, 1, 20))
+
