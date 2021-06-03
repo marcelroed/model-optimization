@@ -22,13 +22,15 @@ import tensorflow as tf
 
 from tensorflow_model_optimization.python.core.keras import compat as tf_compat
 from tensorflow_model_optimization.python.core.sparsity.keras import pruning_utils
+from rich.pretty import pprint
+from rich import print
 
 
 class Pruning(object):
   """Implementation of magnitude-based weight pruning."""
 
   def __init__(self, training_step_fn, pruning_vars, pruning_schedule,
-               block_size, block_pooling_type):
+               block_size, block_pooling_type, filter_pruning_description=None):
     """The logic for magnitude-based pruning weight tensors.
 
     Args:
@@ -45,7 +47,10 @@ class Pruning(object):
     self._pruning_schedule = pruning_schedule
     self._block_size = list(block_size)
     self._block_pooling_type = block_pooling_type
-    self._validate_block()
+    # Only set if layer can (and should) be filter pruned
+    self._filter_pruning_description = filter_pruning_description  # {'filter_block_pooling_type': ..., } or None
+    if filter_pruning_description:
+      print('Set up filter pruning with parameters', filter_pruning_description)
 
     # Training step
     self._step_fn = training_step_fn
@@ -99,6 +104,55 @@ class Pruning(object):
           tf.math.greater_equal(abs_weights, current_threshold), weights.dtype)
     return current_threshold, new_mask
 
+  def _update_filter_mask(self, weights):
+    tf.print('Updating filter mask')
+    abs_weights = tf.math.abs(weights)
+    pooled_weights = pruning_utils.generalized_factorized_pool(
+      abs_weights,
+      window_shape=weights.shape[:3],
+      pooling_type=self._filter_pruning_description['filter_block_pooling_type'],
+      strides=weights.shape[:3],
+      padding='SAME',
+    )
+
+    sparsity = self._pruning_schedule(self._step_fn())[1]
+    with tf.name_scope('filter_pruning_ops'):
+        k = tf.dtypes.cast(
+          tf.math.maximum(
+            tf.math.round(
+              tf.cast(tf.size(pooled_weights), tf.float32) * (1 - sparsity)
+            ), 1
+          ), tf.int32)
+        # Sort the array
+        sorted_values = tf.sort(
+          tf.reshape(abs_weights, [-1]), direction='DESCENDING'
+        )
+        current_threshold = tf.gather(sorted_values, k - 1)
+        new_mask = tf.dtypes.cast(
+          tf.math.greater_equal(abs_weights, current_threshold), weights.dtype
+        )
+
+    # Expand pooled tensor back to the right size
+    updated_mask = pruning_utils.generalized_expand_tensor(new_mask, abs_weights.get_shape()[:-1] + [1])
+
+    # Limit the size of the mask to fit exactly the weights.
+    # Important if the pooling uses any padded elements.
+    sliced_mask = tf.slice(
+      updated_mask, [0, 0, 0, 0],
+      list(abs_weights.get_shape()))
+
+    new_mask = tf.reshape(sliced_mask, tf.shape(weights))
+
+
+    tf.print(
+      'Sparsity:', sparsity, self._step_fn(), '\n',
+      'pooled_weights', pooled_weights, '\n',
+      'Threshold: ', current_threshold, current_threshold.dtype, '\n',
+      'Mask:', tf.reduce_mean(sliced_mask, [0, 1, 2]), summarize=-1
+      )
+
+    return current_threshold, new_mask
+
   def _maybe_update_block_mask(self, weights):
     """Performs block-granular masking of the weights.
 
@@ -118,6 +172,8 @@ class Pruning(object):
     Raises:
       ValueError: if block pooling function is not AVG or MAX
     """
+    if self._filter_pruning_description is not None:
+      return self._update_filter_mask(weights)
     if self._block_size == [1, 1]:
       return self._update_mask(weights)
 
@@ -126,6 +182,7 @@ class Pruning(object):
 
     squeezed_weights = tf.squeeze(weights)
     abs_weights = tf.math.abs(squeezed_weights)
+
     pooled_weights = pruning_utils.factorized_pool(
         abs_weights,
         window_shape=self._block_size,
@@ -139,10 +196,14 @@ class Pruning(object):
     new_threshold, new_mask = self._update_mask(pooled_weights)
 
     updated_mask = pruning_utils.expand_tensor(new_mask, self._block_size)
+
+    # Limit the size of the mask to fit exactly the weights.
+    # Important if the pooling uses any padded elements.
     sliced_mask = tf.slice(
         updated_mask, [0, 0],
         [squeezed_weights.get_shape()[0],
          squeezed_weights.get_shape()[1]])
+
     return new_threshold, tf.reshape(sliced_mask, tf.shape(weights))
 
   def _weight_assign_objs(self):
