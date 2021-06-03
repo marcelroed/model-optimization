@@ -58,6 +58,8 @@ def prune_low_magnitude(to_prune,
                         pruning_schedule=pruning_sched.ConstantSparsity(0.5, 0),
                         block_size=(1, 1),
                         block_pooling_type='AVG',
+                        filter_blocks=False,  # True, False or 'only'
+                        filter_block_pooling_type='AVG',
                         pruning_policy=None,
                         **kwargs):
   """Modify a tf.keras layer or model to be pruned during training.
@@ -185,7 +187,9 @@ def prune_low_magnitude(to_prune,
   params = {
       'pruning_schedule': pruning_schedule,
       'block_size': block_size,
-      'block_pooling_type': block_pooling_type
+      'block_pooling_type': block_pooling_type,
+      'filter_blocks': filter_blocks,  # True, False or 'only'
+      'filter_block_pooling_type': filter_block_pooling_type,  # AVG or MAX, used for deciding the L1 of each filter
   }
 
   is_sequential_or_functional = isinstance(
@@ -213,7 +217,34 @@ def prune_low_magnitude(to_prune,
         'an object of type: {input}.'.format(input=to_prune.__class__.__name__))
 
 
-def strip_pruning(model):
+class SimplificationFailedException(Exception):
+    pass
+
+from skimage.measure import block_reduce
+import numpy as np
+def transform_mask(layer, mask: tf.Tensor):
+    layer: keras.layers.Layer
+    if isinstance(layer, keras.layers.AveragePooling2D):
+        return tf.constant(block_reduce(mask.numpy(), layer.pool_size, np.max))
+    if isinstance(layer, keras.layers.MaxPooling2D):
+        return tf.constant(block_reduce(mask.numpy(), layer.pool_size, np.max))
+    if isinstance(layer, keras.layers.BatchNormalization):
+        return mask
+    print('Not propagating mask for layer', layer)
+    return tf.ones(layer.output_shape)
+
+def _strip_pruning_with_simplification(model: tf.keras.Model):
+    """Lorem ipsum
+
+    Raises:
+        SimplificationFailedException: TODO: When?
+    """
+    layer: pruning_wrapper.PruneLowMagnitude
+    # for layer in model.layers:
+    #     layer.
+
+
+def strip_pruning(model, simplify_structure=False):
   """Strip pruning wrappers from the model.
 
   Once a model has been pruned to required sparsity, this method can be used
