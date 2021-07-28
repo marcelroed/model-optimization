@@ -105,7 +105,7 @@ class Pruning(object):
     return current_threshold, new_mask
 
   def _update_filter_mask(self, weights):
-    tf.print('Updating filter mask')
+    # tf.print('Updating filter mask')
     abs_weights = tf.math.abs(weights)
     pooled_weights = pruning_utils.generalized_factorized_pool(
       abs_weights,
@@ -120,23 +120,31 @@ class Pruning(object):
         k = tf.dtypes.cast(
           tf.math.maximum(
             tf.math.round(
-              tf.cast(tf.size(pooled_weights), tf.float32) * (1 - sparsity)
+              tf.math.multiply(tf.cast(tf.size(pooled_weights), tf.float32), tf.math.subtract(1., tf.cast(sparsity, tf.float32)))
             ), 1
           ), tf.int32)
+
+        # tf.print('K is', k)
         # Sort the array
         sorted_values = tf.sort(
-          tf.reshape(abs_weights, [-1]), direction='DESCENDING'
+          tf.reshape(pooled_weights, [-1]), direction='DESCENDING'
         )
+
+        # tf.print('Sorted:', sorted_values)
+
         current_threshold = tf.gather(sorted_values, k - 1)
+        # tf.print('Threshold:', current_threshold)
         new_mask = tf.dtypes.cast(
-          tf.math.greater_equal(abs_weights, current_threshold), weights.dtype
+          tf.math.greater_equal(pooled_weights, current_threshold), weights.dtype
         )
 
     # Expand pooled tensor back to the right size
+    # tf.print('Pre-expansion new mask', new_mask)
     updated_mask = pruning_utils.generalized_expand_tensor(new_mask, abs_weights.get_shape()[:-1] + [1])
 
     # Limit the size of the mask to fit exactly the weights.
     # Important if the pooling uses any padded elements.
+    # tf.print('Presliced updated mask', updated_mask)
     sliced_mask = tf.slice(
       updated_mask, [0, 0, 0, 0],
       list(abs_weights.get_shape()))
@@ -144,12 +152,12 @@ class Pruning(object):
     new_mask = tf.reshape(sliced_mask, tf.shape(weights))
 
 
-    tf.print(
-      'Sparsity:', sparsity, self._step_fn(), '\n',
-      'pooled_weights', pooled_weights, '\n',
-      'Threshold: ', current_threshold, current_threshold.dtype, '\n',
-      'Mask:', tf.reduce_mean(sliced_mask, [0, 1, 2]), summarize=-1
-      )
+    # tf.print(
+    #   'Sparsity:', sparsity, self._step_fn(), '\n',
+    #   'pooled_weights', pooled_weights, '\n',
+    #   'Threshold: ', current_threshold, current_threshold.dtype, '\n',
+    #   'New Mask:', tf.reduce_mean(sliced_mask, [0, 1, 2]), summarize=-1
+    #   )
 
     return current_threshold, new_mask
 
