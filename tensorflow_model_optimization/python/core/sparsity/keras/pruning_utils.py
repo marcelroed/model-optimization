@@ -191,14 +191,16 @@ def generalized_factorized_pool(input_tensor, window_shape, pooling_type, stride
     assert input_tensor.get_shape().ndims <= 4, 'input_tensor dims must be less than 4'
     assert len(window_shape) == len(strides) == input_tensor.get_shape().ndims - 1
 
+    input_dtype = input_tensor.dtype
+
     with tf.name_scope(name):
         # Pooling operation needs input_tensor to be of shape [batch, *spatial_axes, out_channels], and will pool along spatial_axes
         # We will treat the input channels as a spatial axis in order to pool over it
         aligned = tf.expand_dims(input_tensor, 0)  # Add "batch" dimension
-        pooled = tf.nn.pool(aligned, window_shape, padding=padding, strides=strides, pooling_type=pooling_type)
+        pooled = tf.nn.pool(tf.cast(aligned, tf.float32), window_shape, padding=padding, strides=strides, pooling_type=pooling_type)
         shape_restored = tf.squeeze(pooled, axis=0)  # Remove batch dimension
 
-    return shape_restored
+    return tf.cast(shape_restored, dtype=input_dtype)
 
 
 if __name__ == '__main__':
