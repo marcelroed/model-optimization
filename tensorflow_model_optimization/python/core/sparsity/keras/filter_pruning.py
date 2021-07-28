@@ -167,7 +167,7 @@ def _simplify_conv(conv_layer: layers.Conv2D, context: SimplificationContext):
   return new_conv_layer, context
 
 
-def _strip_pruning_with_simplification(model):
+def strip_pruning_with_simplification(model):
   """Strip pruning wrappers from the model, checking if output dimensions can be reduced.
   Propagate changes to later layers.
 
