@@ -23,6 +23,8 @@ import tensorflow as tf
 
 # TODO(b/139939526): move to public API.
 from tensorflow.python.keras import keras_parameterized
+from tensorflow_model_optimization.python.core.sparsity.keras.pruning_wrapper import PruneLowMagnitude
+
 from tensorflow_model_optimization.python.core.keras import test_utils as keras_test_utils
 from tensorflow_model_optimization.python.core.sparsity.keras import prunable_layer
 from tensorflow_model_optimization.python.core.sparsity.keras import prune
@@ -431,6 +433,71 @@ class PruneTest(test.TestCase, parameterized.TestCase):
     with prune.prune_scope():
       tf.keras.experimental.load_from_saved_model(saved_model_dir)
 
+
+  def makeConvModel(self, single_for_pruning: bool = False, with_fork: bool = True):
+    # Functional model with fork and join
+    input_shape = (3, 3, 2)  # (width, height, channels)
+
+    new_conv = lambda c: layers.Conv2D(c, kernel_size=(1, 1))
+
+    conv1 = new_conv(4)
+    if single_for_pruning:
+      conv1 = prune.prune_low_magnitude(conv1, filter_blocks='only')
+    conv2 = new_conv(5)
+    conv3 = new_conv(6)
+    conv4 = new_conv(7)
+
+    inp = keras.Input(shape=input_shape)
+    x = conv1(inp)
+    y1 = conv2(x)
+    y2 = conv3(x)
+    z = layers.Concatenate(axis=-1)([y1, y2])
+    w = conv4(z)
+
+    func_model = keras.Model([inp], [w])
+    return func_model
+
+  def testSimplifyConv(self):
+    conv_model = self.makeConvModel()
+    conv_layer = conv_model.layers[1]
+    assert isinstance(conv_layer, layers.Conv2D)
+
+    kernel, bias = map(np.array, conv_layer.weights)
+    kernel[:, :, :, [1, 3]] = 0.
+    expected_kernel = kernel[..., [0, 2]]
+    expected_bias = bias[[0, 2]]
+    conv_layer.set_weights([kernel, bias])
+
+    simplified_conv, _, _ = prune._simplify_conv(conv_layer)
+
+    kernel, bias = map(np.array, simplified_conv.weights)
+    np.testing.assert_allclose(kernel, expected_kernel)
+    np.testing.assert_allclose(bias, expected_bias)
+
+  def testSimplifySingleLayerInFunctional(self):
+    conv_model = self.makeConvModel(single_for_pruning=True)
+    conv_layer = conv_model.layers[1]
+
+    assert isinstance(conv_layer, PruneLowMagnitude) and isinstance(conv_layer.layer, layers.Conv2D)
+
+    print(conv_layer.weights)
+    kernel, bias, mask, threshold, pruning_step = map(np.array, conv_layer.weights)
+    kernel[:, :, :, [1, 3]] = 0.
+
+    expected_kernel = kernel[..., [0, 2]]
+    expected_bias = bias[[0, 2]]
+
+    conv_layer.set_weights([kernel, bias])  # , mask, threshold, pruning_step])
+
+    simplified_model = prune.strip_pruning(conv_model, simplify_structure=True)
+
+    simplified_conv = simplified_model.layers[1]
+    assert isinstance(simplified_conv, layers.Conv2D), f'expected the simplified convolution layer to be layers.Conv2D, but found type {type(simplified_conv)}'
+    kernel, bias = map(np.array, simplified_conv.weights)
+
+    # Checks shape and content of weights are as expected
+    np.testing.assert_allclose(kernel, expected_kernel)
+    np.testing.assert_allclose(bias, expected_bias)
 
 if __name__ == '__main__':
   test.main()
