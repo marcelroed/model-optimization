@@ -20,6 +20,7 @@ import tensorflow as tf
 from tensorflow_model_optimization.python.core.keras import metrics
 from tensorflow_model_optimization.python.core.sparsity.keras import pruning_schedule as pruning_sched
 from tensorflow_model_optimization.python.core.sparsity.keras import pruning_wrapper
+from tensorflow_model_optimization.python.core.sparsity.keras.filter_pruning import strip_pruning_with_simplification
 
 keras = tf.keras
 custom_object_scope = tf.keras.utils.custom_object_scope
@@ -233,15 +234,7 @@ def transform_mask(layer, mask: tf.Tensor):
     print('Not propagating mask for layer', layer)
     return tf.ones(layer.output_shape)
 
-def _strip_pruning_with_simplification(model: tf.keras.Model):
-    """Lorem ipsum
 
-    Raises:
-        SimplificationFailedException: TODO: When?
-    """
-    layer: pruning_wrapper.PruneLowMagnitude
-    # for layer in model.layers:
-    #     layer.
 
 
 def strip_pruning(model, simplify_structure=False):
@@ -254,6 +247,7 @@ def strip_pruning(model, simplify_structure=False):
 
   Arguments:
       model: A `tf.keras.Model` instance with pruned layers.
+      simplify_structure: Simplify layers to make them structurally smaller if possible. This can change the size of the weights and input/output size of several layers.
 
   Returns:
     A keras model with pruning wrappers removed.
@@ -269,12 +263,15 @@ def strip_pruning(model, simplify_structure=False):
   pruned_model = prune_low_magnitude(orig_model)
   exported_model = strip_pruning(pruned_model)
   ```
-  The exported_model and the orig_model share the same structure.
+  If simplify_structure is False, the exported_model and the orig_model share the same structure.
   """
 
   if not isinstance(model, keras.Model):
     raise ValueError(
         'Expected model to be a `tf.keras.Model` instance but got: ', model)
+
+  if simplify_structure:
+      return strip_pruning_with_simplification(model)
 
   def _strip_pruning_wrapper(layer):
     if isinstance(layer, tf.keras.Model):
