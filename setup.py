@@ -38,6 +38,7 @@ REQUIRED_PACKAGES = [
     'six~=1.10',
     'enum34~=1.1;python_version<"3.4"',
     'dm-tree~=0.1.1',
+    'keras-surgeon @ git+git://github.com/marcelroed/keras-surgeon@master#egg=keras-surgeon'
 ]
 
 if '--release' in sys.argv:
