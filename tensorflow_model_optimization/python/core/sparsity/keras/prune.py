@@ -20,7 +20,7 @@ import tensorflow as tf
 from tensorflow_model_optimization.python.core.keras import metrics
 from tensorflow_model_optimization.python.core.sparsity.keras import pruning_schedule as pruning_sched
 from tensorflow_model_optimization.python.core.sparsity.keras import pruning_wrapper
-from tensorflow_model_optimization.python.core.sparsity.keras.filter_pruning import strip_pruning_with_simplification
+from tensorflow_model_optimization.python.core.sparsity.keras.filter_pruning import simplify_stripped_model
 
 keras = tf.keras
 custom_object_scope = tf.keras.utils.custom_object_scope
@@ -221,18 +221,16 @@ def prune_low_magnitude(to_prune,
 class SimplificationFailedException(Exception):
     pass
 
-from skimage.measure import block_reduce
-import numpy as np
-def transform_mask(layer, mask: tf.Tensor):
-    layer: keras.layers.Layer
-    if isinstance(layer, keras.layers.AveragePooling2D):
-        return tf.constant(block_reduce(mask.numpy(), layer.pool_size, np.max))
-    if isinstance(layer, keras.layers.MaxPooling2D):
-        return tf.constant(block_reduce(mask.numpy(), layer.pool_size, np.max))
-    if isinstance(layer, keras.layers.BatchNormalization):
-        return mask
-    print('Not propagating mask for layer', layer)
-    return tf.ones(layer.output_shape)
+# def transform_mask(layer, mask: tf.Tensor):
+#     layer: keras.layers.Layer
+#     if isinstance(layer, keras.layers.AveragePooling2D):
+#         return tf.constant(block_reduce(mask.numpy(), layer.pool_size, np.max))
+#     if isinstance(layer, keras.layers.MaxPooling2D):
+#         return tf.constant(block_reduce(mask.numpy(), layer.pool_size, np.max))
+#     if isinstance(layer, keras.layers.BatchNormalization):
+#         return mask
+#     print('Not propagating mask for layer', layer)
+#     return tf.ones(layer.output_shape)
 
 
 
@@ -270,8 +268,6 @@ def strip_pruning(model, simplify_structure=False):
     raise ValueError(
         'Expected model to be a `tf.keras.Model` instance but got: ', model)
 
-  if simplify_structure:
-      return strip_pruning_with_simplification(model)
 
   def _strip_pruning_wrapper(layer):
     if isinstance(layer, tf.keras.Model):
@@ -288,5 +284,11 @@ def strip_pruning(model, simplify_structure=False):
       return layer.layer
     return layer
 
-  return keras.models.clone_model(
+  stripped = keras.models.clone_model(
       model, input_tensors=None, clone_function=_strip_pruning_wrapper)
+
+  if simplify_structure:
+    simplified = simplify_stripped_model(stripped)
+    return simplified
+
+  return stripped

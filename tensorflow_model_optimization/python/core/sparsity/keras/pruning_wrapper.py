@@ -95,14 +95,15 @@ class PruneLowMagnitude(Wrapper):
 
   _PRUNE_CALLBACK_ERROR_MSG = (
       'Prune() wrapper requires the UpdatePruningStep callback to be provided '
-      'during training. Please add it as a callback to your model.fit call.')
+      'during training. Please add it as a callback to your model.fit call.'
+  )
 
   def __init__(self,
                layer,
                pruning_schedule=pruning_sched.ConstantSparsity(0.5, 0),
                block_size=(1, 1),
                block_pooling_type='AVG',
-               filter_blocks=False,
+               filter_blocks=False,  # True or False for individual layer
                filter_block_pooling_type='AVG',
                **kwargs):
     """Create a pruning wrapper for a keras layer.
@@ -248,6 +249,11 @@ class PruneLowMagnitude(Wrapper):
         if self.filter_blocks and prune_registry.PruneRegistry.supports_by_filter(self.layer)
         else None
     )
+
+    # If filter_pruning is set to 'only', don't allow non-convolutional layers to prune
+    if isinstance(self.filter_blocks, str) and self.filter_blocks.lower() == 'only' and not prune_registry.PruneRegistry.supports_by_filter(self.layer):
+      self.pruning_vars = []  # The pruning implementation will ignore this layer
+
     self.pruning_obj = pruning_impl.Pruning(
         training_step_fn=training_step_fn,
         pruning_vars=self.pruning_vars,

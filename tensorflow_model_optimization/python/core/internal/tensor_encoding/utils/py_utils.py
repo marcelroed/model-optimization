@@ -20,7 +20,10 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import ast
 import enum
+import inspect
+
 import numpy as np
 import six
 import tensorflow as tf
@@ -187,3 +190,59 @@ def assert_compatible(spec, value):
   compatible = tf.nest.map_structure(validate_spec, spec, value)
   if not all(tf.nest.flatten(compatible)):
     raise ValueError('The provided value is not compatible with spec.')
+
+
+def _args_from_usage_string_ast(s):
+  tree = ast.parse(s)
+  ast_args = tree.body[0].value.args
+  args = [s[arg.col_offset:arg.end_col_offset] for arg in ast_args]
+  return args
+
+
+def _space_all_but_first(s, n_spaces):
+  """Pad all lines except the first with n_spaces spaces"""
+  lines = s.splitlines()
+  for i in range(1, len(lines)):
+    lines[i] = ' ' * n_spaces + lines[i]
+  return '\n'.join(lines)
+
+
+def _print_spaced(varnames, vals, **kwargs):
+  """Print variables with their variable names"""
+  for varname, val in zip(varnames, vals):
+    prefix = f'{varname} = '
+    n_spaces = len(prefix)
+    spaced = _space_all_but_first(str(val), n_spaces)
+    print(f'{prefix}{spaced}', **kwargs)
+
+
+def dbg(*vals, **kwargs):
+  """
+  Print the file, linenumber, variable name and value.
+  Doesn't work if expanded to multiple lines
+  Eg. don't do
+  ```
+  dbg(
+      variable
+  )
+  ```
+  """
+  frame = inspect.currentframe()
+  outer_frame = inspect.getouterframes(frame)[1]
+
+  frame_info = inspect.getframeinfo(outer_frame[0])
+  string = frame_info.code_context[0].strip()
+
+  filename = frame_info.filename.split('/')[-1]
+  lineno = frame_info.lineno
+  args = _args_from_usage_string_ast(string)
+
+  # Exclude keywords arguments
+  names = [arg.strip() for arg in args if '=' not in arg]
+
+  # Prepend filename and line number
+  names = [f'[{filename}:{lineno}] {name}' for name in names]
+
+  _print_spaced(names, vals, **kwargs)
+
+

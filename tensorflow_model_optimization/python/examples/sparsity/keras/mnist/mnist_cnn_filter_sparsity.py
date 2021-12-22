@@ -20,13 +20,14 @@ from absl import app as absl_app
 from absl import flags
 
 import tensorflow as tf
+import numpy as np
 
 import tensorflow_model_optimization as tfmot
 from tensorflow_model_optimization.python.core.sparsity.keras import prune
 from tensorflow_model_optimization.python.core.sparsity.keras import pruning_callbacks
 from tensorflow_model_optimization.python.core.sparsity.keras import pruning_schedule
 from tensorflow_model_optimization.python.core.sparsity.keras import pruning_wrapper
-from rich.pretty import pprint
+# from rich.pretty import pprint
 
 ConstantSparsity = pruning_schedule.ConstantSparsity
 keras = tf.keras
@@ -125,8 +126,8 @@ def train_and_save(models, x_train, y_train, x_test, y_test):
                 layer = potentially_wrapper.layer
                 if isinstance(layer, layers.Conv2D):
                     pruning_vars = potentially_wrapper.pruning_vars
-                    for weight, mask, threshold in pruning_vars:
-                        pprint(tf.reduce_mean(mask, axis=[0, 1, 2]))
+                    # for weight, mask, threshold in pruning_vars:
+                    #     pprint(tf.reduce_mean(mask, axis=[0, 1, 2]))
 
         # exit()
         score = model.evaluate(x_test, y_test, verbose=0)
@@ -145,7 +146,7 @@ def train_and_save(models, x_train, y_train, x_test, y_test):
         print('Test accuracy:', score[1])
 
 
-def main(unused_argv):
+def main(_argv):
     # input image dimensions
     img_rows, img_cols = 28, 28
 
@@ -175,9 +176,9 @@ def main(unused_argv):
 
     pruning_params = {
         # 'pruning_schedule': ConstantSparsity(0.75, begin_step=2000, frequency=100),
-        'pruning_schedule': pruning_schedule.PolynomialDecay(0., 0.5, begin_step=2000, end_step=3000),
-        # 'filter_blocks': True,
-        # 'filter_block_pooling_type': 'MAX',
+        'pruning_schedule': pruning_schedule.PolynomialDecay(0., 0.5, begin_step=2000, end_step=4000),
+        'filter_blocks': 'only',
+        'filter_block_pooling_type': 'MAX',
     }
 
     # layerwise_model = build_layerwise_model(input_shape, **pruning_params)
@@ -192,6 +193,24 @@ def main(unused_argv):
     # models = [layerwise_model, sequential_model, functional_model]
     models = [sequential_model]
     train_and_save(models, x_train, y_train, x_test, y_test)
+
+
+def test_simplify():
+    # With single conv layer
+    network = tf.keras.Sequential([  # Input shape (None, 4, 4, 3)
+        l.Conv2D(10, kernel_size=(2, 2), strides=(1, 1)),  # -> (None, 3, 3, 10)
+    ])
+
+    network = prune.prune_low_magnitude(network)
+    network.compile(loss=tf.keras.losses.MSE)
+    network(tf.zeros(shape=(10, 4, 4, 3)))
+
+    kernel, bias = network.layers[0].get_weights()
+    kernel = np.array(network.layers[0].get_weights()[0])
+    kernel[:, :, :, [1, 4, 7]] = 0.
+    network.layers[0].set_weights([kernel, bias])
+
+    stripped = prune.strip_pruning(network, simplify_structure=True)
 
 
 if __name__ == '__main__':

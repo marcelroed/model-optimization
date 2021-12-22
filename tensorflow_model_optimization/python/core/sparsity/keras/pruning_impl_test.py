@@ -23,6 +23,7 @@ from __future__ import print_function
 from absl.testing import parameterized
 import numpy as np
 import tensorflow as tf
+from tensorflow_model_optimization.python.core.internal.tensor_encoding.utils import dbg
 
 # TODO(b/139939526): move to public API.
 from tensorflow.python.keras import keras_parameterized
@@ -60,6 +61,7 @@ class PruningTest(test.TestCase, parameterized.TestCase):
   # themselves, resulting in initializing graph tensors instead of eager
   # tensors when testing eager execution.
   def initialize(self):
+    """Set the global step to a tf.Variable containing 0 and the global step function to return the global step"""
     self.global_step = tf.Variable(
         tf.zeros([], dtype=dtypes.int32),
         dtype=dtypes.int32,
@@ -245,6 +247,60 @@ class PruningTest(test.TestCase, parameterized.TestCase):
     # Weights pruned at steps 1,3,5
     expected_non_zero_count = [100, 90, 90, 70, 70, 50, 50, 50, 50, 50]
     self.assertAllEqual(expected_non_zero_count, non_zero_count)
+
+  def testFilterPruning(self):
+    # (width, height, in_channels, out_channels)
+    weight_shape = (1, 1, 2, 3)
+    weight_size = np.prod(weight_shape)  # number of elements in the weight tensor
+    # Construct weight matrix using numbers 1.0..weight_size
+    weight = tf.Variable(np.linspace(1.0, float(weight_size), int(weight_size)).reshape(weight_shape), name="weights")
+    weight_dtype = weight.dtype.base_dtype
+
+    # Mask starts of as matrix of ones of the same shape as the weight matrix
+    mask = tf.Variable(
+        tf.ones(weight.get_shape(), dtype=weight_dtype),
+        name="mask",
+        dtype=weight_dtype)
+
+    # Threshold starts off scalar tensor 0
+    threshold = tf.Variable(
+        tf.convert_to_tensor(0, dtype=weight_dtype), name="threshold", dtype=weight_dtype)
+
+    self.initialize()  # Set self.global_step and self.global_step_fn
+
+    # Pruning schedule
+    def linear_sparsity(step):
+      sparsity_val = tf.convert_to_tensor(
+        [0.0, 0.1, 0.1, 0.3, 0.3, 0.51, 0.51, 0.51, 0.51, 0.51])
+      # TODO(marcelroed) what does the bool mean?
+      #      ?whether or not to prune?   sparsity proportion
+      return tf.convert_to_tensor(True), sparsity_val[step]
+
+    p = pruning_impl.Pruning(
+      pruning_vars=[(weight, mask, threshold)],
+      training_step_fn=self.training_step_fn,
+      pruning_schedule=linear_sparsity,
+      block_size=(1, 1),
+      block_pooling_type='AVG',
+      filter_pruning_description={'filter_block_pooling_type': 'MAX'}
+    )
+    non_zero_count = []
+    tf.print('Before pruning:', self.global_step, K.get_value(weight), mask)
+    for _ in range(10):
+      p.conditional_mask_update()
+      p.weight_mask_op()
+      assign_add(self.global_step, 1)
+      non_zero_count.append(np.count_nonzero(K.get_value(weight)))
+      tf.print(self.global_step, K.get_value(weight))
+      if self.global_step.read_value() < 10:
+        tf.print(linear_sparsity(self.global_step.read_value()))
+
+    # Why does it not prune 50% when the sparsity is at 0.5?
+    # Because the output channels are being pruned, meaning we have to prune either 33.33%, 66.66% or 100%
+    # If we change the sparsity to 0.51 we find that 66.66% is closer to the desired sparsity, so it will prune 2/3 output channels.
+    dbg(non_zero_count)
+
+
 
 
 if __name__ == "__main__":

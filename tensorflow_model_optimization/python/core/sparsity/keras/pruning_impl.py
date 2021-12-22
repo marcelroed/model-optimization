@@ -22,8 +22,7 @@ import tensorflow as tf
 
 from tensorflow_model_optimization.python.core.keras import compat as tf_compat
 from tensorflow_model_optimization.python.core.sparsity.keras import pruning_utils
-from rich.pretty import pprint
-from rich import print
+# from rich import print
 
 
 class Pruning(object):
@@ -115,8 +114,12 @@ class Pruning(object):
       padding='SAME',
     )
 
-    sparsity = self._pruning_schedule(self._step_fn())[1]
+    current_step = self._step_fn()
+    current_step_int = int(current_step)
+
+    sparsity = self._pruning_schedule(current_step)[1]
     with tf.name_scope('filter_pruning_ops'):
+        # max(round((1 - sparsity) * #filters), 1).astype(int)
         k = tf.dtypes.cast(
           tf.math.maximum(
             tf.math.round(
@@ -150,6 +153,8 @@ class Pruning(object):
       list(abs_weights.get_shape()))
 
     new_mask = tf.reshape(sliced_mask, tf.shape(weights))
+
+    delta_mask = tf.logical_not()
 
 
     # tf.print(
